@@ -1,30 +1,158 @@
-import sys
-sys.path.append('./site-packages')
 import pyodbc
 import pandas as pd
 
-DRIVER = '{SQL Server}'
-SERVER = 'HP-ENVY'
-DATABASE = 'MANAGE_TEST'
-TRUSTED_CONNECTION ='yes'
-SQL_SELECT = "SELECT SHC_CD, DEP_CD, CLS_CD, SHC_NAME, DEP_NAME, CLS_NAME, CONCAT(SHC_CD, DEP_CD, CLS_CD) AS 比較用コード FROM SCHOOL_INFO"
-    
-URL = 'DRIVER='+DRIVER+';SERVER='+SERVER+';DATABASE='+DATABASE+';PORT=1433;Trusted_Connection='+TRUSTED_CONNECTION+';'
+import constants
 
-def get_current_data():
-    """現在のDBデータを取得して配列で返却する
+db_connection = None
+
+def initialize_db_connection():
+    """データベース接続を初期化"""
+    global db_connection
+    if db_connection is None:
+        db_connection = pyodbc.connect(constants.URL)
+        print("Database connection established.")
+
+def close_db_connection():
+    """データベース接続を閉じる"""
+    global db_connection
+    if db_connection is not None:
+        db_connection.close()
+        db_connection = None
+        print("Database connection closed.")
+
+def get_personal_info():
     """
-    conn = pyodbc.connect(URL)
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM Inquiry')
-    rows = cursor.fetchall()
+        個人情報データの取得、IDと名前だけ
+    """
+    global db_connection
+    df = pd.read_sql(constants.SELECT_PERSONAL, db_connection)
+    
+    return df
 
-    cursor.close()
-    conn.close()
+def get_keito_wish():
+    """
+        希望系統（資料請求情報）の取得
+        データはA1, A2, A3の3通り
+    """
+    global db_connection
+    df = pd.read_sql(constants.SELECT_KEITO_WISH, db_connection)
     
-    print(rows)
+    # 固定するKEITO_WISHの順番
+    all_keito = ['A1', 'A2', 'A3']
     
-    return rows
+    result = make_pivot(df, all_keito, '希望系統(資料請求)', 'WISH_KEITO_CD')
+    
+    return result
+
+def get_keito_jiko():
+    """
+        希望系統（自己申告）の取得
+        データはB1, B2, B3の3通り
+    """
+    global db_connection
+    df = pd.read_sql(constants.SELECT_KEITO_JIKO, db_connection)
+    
+    # 固定するKEITO_WISHの順番
+    all_keito = ['B1', 'B2', 'B3']
+    
+    result = make_pivot(df, all_keito, '希望系統(自己申告)', 'JIKO_KEITO_CD')
+    
+    return result
+    
+def get_seikyu_univ():
+    """
+        資料請求した大学コードの取得
+        カンマ区切りで1列で取得
+    """
+    global db_connection
+    df = pd.read_sql(constants.SELECT_SEIKYU_UNIV, db_connection)
+    
+    result = df.groupby('PERSONAL_ID')['UNIV_CD'].agg(', '.join).reset_index()
+    
+    return result
+
+def get_area():
+    """
+        エリア情報の取得
+        データはX, Y, Zの3種類
+    """
+    global db_connection
+    df = pd.read_sql(constants.SELECT_AREA, db_connection)
+    
+    # 固定するAREAの順番
+    all_area = ['X', 'Y', 'Z']
+
+    result = make_pivot(df, all_area, '希望エリア', 'WISH_AREA')
+    
+    return result
+
+def get_wish_job():
+    """
+        希望職種の取得
+        データは1,2,3の3種類
+    """
+    global db_connection
+    df = pd.read_sql(constants.SELECT_WISH_JOB, db_connection)
+    
+    all_jobs = ['1', '2', '3']
+    
+    result = make_pivot(df, all_jobs, '希望職種', 'WISH_JOB_CD')
+    
+    return result
+
+def get_request_cd():
+    """
+        リクエストコードの取得
+        昇順に最大3個まで
+    """
+    global db_connection
+    df = pd.read_sql(constants.SELECT_REQUEST, db_connection)
+    
+    # P_IDごとにRES_CDを昇順にソートしてリスト化
+    grouped = (
+        df.sort_values(by="RESPONSE_CD")  # RES_CDを昇順にソート
+        .drop_duplicates(subset=["PERSONAL_ID", "RESPONSE_CD"])  # 重複を削除
+        .groupby("PERSONAL_ID")["RESPONSE_CD"]  # P_IDごとにグループ化
+        .apply(lambda x: (x.tolist()[:3] + [0] * 3)[:3])  # 各グループで最大3つをリスト化
+        .reset_index()  # インデックスをリセット
+    )
+
+    # リストを列に展開し、列名を「資料1」「資料2」「資料3」に設定
+    result = grouped["RESPONSE_CD"].apply(pd.Series)
+    result.columns = ["コード1", "コード2", "コード3"]
+
+    # P_IDを結合
+    result.insert(0, "PERSONAL_ID", grouped["PERSONAL_ID"])
+
+    # 結果を表示
+    return result
+    
+def get_all_data():
+    try:
+        initialize_db_connection()
+        
+        df1 = get_personal_info()
+        df2 = get_keito_wish()
+        df3 = get_keito_jiko()
+        df4 = get_seikyu_univ()
+        df5 = get_area()
+        df6 = get_wish_job()
+        df7 = get_request_cd()
+        
+        # データフレームリスト
+        dfs = [df1, df2, df3, df4, df5, df6, df7]
+
+        # 1つ目のデータフレームを基に結合を始める
+        result = dfs[0]
+
+        # 残りのデータフレームを順番に結合
+        for df in dfs[1:]:
+            result = pd.merge(result, df, on='PERSONAL_ID', how='inner')
+            
+        result.to_csv('output.tsv', sep='\t', index=False, encoding='shift-jis', line_terminator='\r\n')
+        
+    finally:
+        close_db_connection()
 
 def get_gaisan():
     """現在のDBデータを取得して配列で返却する
@@ -103,72 +231,27 @@ GROUP BY
 
     print(result)
     
-    
     return df
 
-def conma_test():
-    conn = pyodbc.connect(URL)
-    cursor = conn.cursor()
-    
-    # 資料請求情報の取得
-    SIRYO_SQL = """
-        SELECT P_ID, U_CD FROM Inquiry
-    """
-    
-    df = pd.read_sql(SIRYO_SQL, conn)
+def make_pivot(df, fixed_column, column_name_logical, column_name_physical):
+    # データに対応する列名を生成
+    column_mapping = {area: f"{column_name_logical}{i + 1}" for i, area in enumerate(fixed_column)}
 
-    cursor.close()
-    conn.close()
-    
-    result = df.groupby('P_ID')['U_CD'].agg(', '.join).reset_index()
-    
-    return result
-    
-def res_test():
-    data = [
-        {"P_ID": "P0001", "RES_CD": "R004"},
-        {"P_ID": "P0001", "RES_CD": "R005"},
-        {"P_ID": "P0001", "RES_CD": "R001"},
-        {"P_ID": "P0001", "RES_CD": "R006"},
-        {"P_ID": "P0001", "RES_CD": "R007"},
-        {"P_ID": "P0002", "RES_CD": "R003"},
-        {"P_ID": "P0002", "RES_CD": "R002"},
-        {"P_ID": "P0003", "RES_CD": "R008"},
-        {"P_ID": "P0003", "RES_CD": "R009"},
-        {"P_ID": "P0003", "RES_CD": "R001"},
-        {"P_ID": "P0004", "RES_CD": "R004"},
-        {"P_ID": "P0005", "RES_CD": "R001"}
-    ]
-
-    df = pd.DataFrame(data)
-
-    # P_IDごとにRES_CDを昇順にソートしてリスト化
-    grouped = (
-        df.sort_values(by="RES_CD")  # RES_CDを昇順にソート
-        .groupby("P_ID")["RES_CD"]  # P_IDごとにグループ化
-        .apply(lambda x: x.head(3).tolist())  # 各グループで最大3つをリスト化
-        .reset_index()  # インデックスをリセット
+    # ピボットテーブル形式で変換
+    result = (
+        df.assign(value=1)  # 存在フラグを1で設定
+        .pivot_table(index="PERSONAL_ID", columns=column_name_physical, values="value", fill_value=0)
+        .reset_index()
     )
 
-    # リストを列に展開し、列名を「資料1」「資料2」「資料3」に設定
-    result = grouped["RES_CD"].apply(pd.Series)
-    result.columns = ["資料1", "資料2", "資料3"]
+    # 列名を動的に変更
+    result = result.rename(columns=column_mapping)
 
-    # P_IDを結合
-    result.insert(0, "P_ID", grouped["P_ID"])
-
-    # 結果を表示
+    # 固定列の順序を設定
+    columns = ["PERSONAL_ID"] + [column_mapping[column] for column in fixed_column]
+    result = result.reindex(columns=columns, fill_value=0)
+    
     return result
 
-def describe(count):
-    df = pd.DataFrame(count)
-    print(df)
-
-count = get_gaisan()
-
-# a = conma_test()
-# b = res_test()
-
-# data = pd.merge(a, b, on="P_ID", how="inner")
-
-# data.to_excel('test.xlsx', index=False)
+if __name__ == '__main__':
+    get_all_data()
