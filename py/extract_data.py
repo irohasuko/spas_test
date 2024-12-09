@@ -157,33 +157,33 @@ def get_all_data():
 def get_gaisan():
     """現在のDBデータを取得して配列で返却する
     """
-    conn = pyodbc.connect(URL)
+    conn = pyodbc.connect(constants.URL)
     cursor = conn.cursor()
     
     # 資料請求情報の取得
     SIRYO_SQL = """
-SELECT 
-    NOW_GRADE, 
-    P_CD, 
-    K_DIC, 
-    COUNT(1) AS cnt 
-FROM (
-    SELECT 
-        R_YEAR, 
-        R_GRADE, 
-        2022 - CAST(R_YEAR AS INT) + CAST(R_GRADE AS INT) AS NOW_GRADE, 
-        P_CD, 
-        K_DIC
-    FROM CustomerInfo AS CI
-    INNER JOIN Inquiry AS I ON CI.P_ID = I.P_ID
-    INNER JOIN HighSchoolMaster AS HM ON CI.K_CD = HM.K_CD
-) AS subquery
-GROUP BY 
-    R_YEAR, 
-    R_GRADE, 
-    P_CD, 
-    K_DIC, 
-    NOW_GRADE;
+        SELECT 
+            NOW_GRADE, 
+            P_CD, 
+            K_DIC, 
+            COUNT(1) AS cnt 
+        FROM (
+            SELECT 
+                R_YEAR, 
+                R_GRADE, 
+                2022 - CAST(R_YEAR AS INT) + CAST(R_GRADE AS INT) AS NOW_GRADE, 
+                P_CD, 
+                K_DIC
+            FROM CustomerInfo AS CI
+            INNER JOIN Inquiry AS I ON CI.P_ID = I.P_ID
+            INNER JOIN HighSchoolMaster AS HM ON CI.K_CD = HM.K_CD
+        ) AS subquery
+        GROUP BY 
+            R_YEAR, 
+            R_GRADE, 
+            P_CD, 
+            K_DIC, 
+            NOW_GRADE;
     """
     
     df = pd.read_sql(SIRYO_SQL, conn)
@@ -234,6 +234,33 @@ GROUP BY
     return df
 
 def make_pivot(df, fixed_column, column_name_logical, column_name_physical):
+    """
+        入力されたDataFrameを指定された列に基づいてピボットする関数です。
+
+        この関数は、入力されたDataFrame `df`を、指定された`fixed_column`列を行として固定し、 
+        `column_name_logical`列の値を新しい列名として、`column_name_physical`列の値を対応するセルの値としてピボットします。
+        ピボット後のDataFrameを返します。
+
+        パラメータ:
+        -----------
+        df : pandas.DataFrame
+            ピボット対象となる入力DataFrame。
+
+        fixed_column : List[str]
+            ピボット後の行インデックスとして固定する列名のリスト
+
+        column_name_logical : str
+            ピボット後の列名として使われる列名。
+
+        column_name_physical : str
+            セルの値として使用される列名。
+
+        戻り値:
+        --------
+        pandas.DataFrame
+            `fixed_column`を行、`column_name_logical`を列、`column_name_physical`をセルの値として
+            ピボットされたDataFrame。
+    """
     # データに対応する列名を生成
     column_mapping = {area: f"{column_name_logical}{i + 1}" for i, area in enumerate(fixed_column)}
 
