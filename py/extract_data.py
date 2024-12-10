@@ -186,16 +186,16 @@ def get_gaisan():
             NOW_GRADE;
     """
     
-    df = pd.read_sql(SIRYO_SQL, conn)
+    # df = pd.read_sql(SIRYO_SQL, conn)
 
-    cursor.close()
-    conn.close()
+    # cursor.close()
+    # conn.close()
     
-    print(df)
+    # print(df)
     
-    df = df.pivot_table(index='P_CD', columns='K_DIC', values='cnt', aggfunc='sum')
+    # df = df.pivot_table(index='P_CD', columns='K_DIC', values='cnt', aggfunc='sum')
     
-    print(df)
+    # print(df)
     
     # データフレームの作成
     data = {
@@ -210,7 +210,11 @@ def get_gaisan():
     fixed_columns = ["A1", "B2", "C2"]
 
     # P_CD ごとに K_DIC をカウント集計
-    grouped = df.groupby(["P_CD", "K_DIC"])["cnt"].sum().unstack(fill_value=0)
+    grouped = df.pivot_table(index=["P_CD", "NOW_GRADE"], 
+                        columns="K_DIC", 
+                        values="cnt", 
+                        aggfunc="sum", 
+                        fill_value=0)
 
     # 固定列を反映し、欠けている列を 0 で補完
     for col in fixed_columns:
@@ -221,15 +225,15 @@ def get_gaisan():
     grouped = grouped[fixed_columns]
 
     # 各行の合計（新しい列 "Row_Total" を追加）
-    grouped["Row_Total"] = grouped.sum(axis=1)
+    # grouped["Row_Total"] = grouped.sum(axis=1)
 
-    # 各列の合計（新しい行 "Column_Total" を追加）
-    grouped.loc["Column_Total"] = grouped.sum()
+    # # 各列の合計（新しい行 "Column_Total" を追加）
+    # grouped.loc["Column_Total"] = grouped.sum()
 
     # 結果をリセットインデックスして整形
-    result = grouped.reset_index()
+    # result = grouped.reset_index()
 
-    print(result)
+    print(grouped)
     
     return df
 
@@ -262,23 +266,29 @@ def make_pivot(df, fixed_column, column_name_logical, column_name_physical):
             ピボットされたDataFrame。
     """
     # データに対応する列名を生成
-    column_mapping = {area: f"{column_name_logical}{i + 1}" for i, area in enumerate(fixed_column)}
+    column_mapping = {column: f"{column_name_logical}{i + 1}" for i, column in enumerate(fixed_column)}
 
     # ピボットテーブル形式で変換
     result = (
-        df.assign(value=1)  # 存在フラグを1で設定
-        .pivot_table(index="PERSONAL_ID", columns=column_name_physical, values="value", fill_value=0)
-        .reset_index()
+        df.assign(**{col: (df[column_name_physical] == col).astype(int) for col in fixed_column})
+        .drop(columns=[column_name_physical])
+        .groupby("PERSONAL_ID", as_index=False)
+        .max()
     )
 
     # 列名を動的に変更
     result = result.rename(columns=column_mapping)
-
-    # 固定列の順序を設定
-    columns = ["PERSONAL_ID"] + [column_mapping[column] for column in fixed_column]
-    result = result.reindex(columns=columns, fill_value=0)
     
     return result
 
 if __name__ == '__main__':
-    get_all_data()
+    get_gaisan()
+    
+    data = {
+        "PERSONAL_ID": [1, 2, 1, 3],
+        "P_CD": [None, None, None, None],
+    }
+    
+    df =pd.DataFrame(data)
+    
+    print(make_pivot(df, ['A1', 'A2', 'B1'], '請求', 'P_CD'))
